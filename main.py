@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime, timedelta
 
-from app import models, crud, schemas
+from app import models, crud, schemas, notification
 from app.database import SessionLocal, engine
 import pandas as pd
 import numpy as np
@@ -158,17 +158,22 @@ def main():
         footprint = foot_print_transformation(df)
         cluster_result = volume_cluster(footprint)
         cluster_result.to_csv(f'cluster_{start_time}.csv', sep='\t', header=None, mode='a')
+        if cluster_result['TopPrice'][0] != 0:
+            notification.sent_msg(f"Volume cluster at {cluster_result['TopPrice'][0]} USD at {cluster_result['Time'][0]}")
 
         imbalance_result = imbalance(footprint)
         imbalance_result.to_csv(f'imbalance_{start_time}.csv', sep='\t', header=None, mode='a')
+        if imbalance_result['StackedPrice'][0] != 0:
+            notification.sent_msg(f"{imbalance_result['StackType'][0]} stacked imbalance at {imbalance_result['StackedPrice'][0]} USD at {imbalance_result['Time'][0]}")
 
         price, multiple_count_new, multiple_result = multiple_high_volume_node(footprint, n_node=2, last_price=last_price, multiple_count=multiple_count)
         multiple_result.to_csv(f'multiple_{start_time}.csv', sep='\t', header=None, mode='a')
+        if multiple_result['HighVolumePrice'][0] != 0:
+            notification.sent_msg(f"Multiple high volume node at {multiple_result['HighVolumePrice'][0]} USD at {multiple_result['Time'][0]}")
+
 
         last_price = price
         multiple_count = multiple_count_new
-        print(last_price)
-        print(multiple_count)
         time.sleep(60)
 
 if __name__ == "__main__":
