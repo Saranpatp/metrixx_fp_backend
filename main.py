@@ -89,8 +89,8 @@ def imbalance(footprint, tick_size = 0.25, stacked_param = 3, imbalance_param = 
     temp = pd.DataFrame(np.arange (testdf['Price'].min(),testdf['Price'].max()+tick_size,tick_size)).rename(columns={0: "Price"})
     temp = temp.sort_values(by=['Price'],ascending=False)
     temp["Price_Up"] = temp['Price']+tick_size
-    temp = temp.merge(testdf[{'Price','Bid'}], how='left')
-    temp = temp.merge(testdf[{'Price','Ask'}], how='left', left_on='Price_Up', right_on='Price')
+    temp = temp.merge(testdf[['Price','Bid']], how='left')
+    temp = temp.merge(testdf[['Price','Ask']], how='left', left_on='Price_Up', right_on='Price')
     temp = temp.rename(columns={'Price_x': "Price"})
     temp = temp[['Price','Bid','Ask']]
     temp['imbalance'] = abs(temp['Bid'] - temp['Ask']) / np.minimum(temp['Bid'], temp['Ask'])
