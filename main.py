@@ -11,6 +11,7 @@ import csv
 
 # Initialize the database
 models.Base.metadata.create_all(bind=engine)
+tickers = ['MES 06-24', 'ES 06-24']
 
 def get_db():
     db = SessionLocal()
@@ -34,10 +35,10 @@ def fetch_and_print_latest_data():
     print(df.head())
     return df
 
-def fetch_and_print_last_min_data():
+def fetch_and_print_last_min_data(symbol = 'MES 06-24'):
     with next(get_db()) as db:
         curr_time = datetime.now().replace(second=0) - timedelta(seconds=1)
-        market_data = crud.get_market_data_by_symbol_time(db, symbol='MES 06-24', start_time= curr_time - timedelta(minutes=1), end_time=curr_time)
+        market_data = crud.get_market_data_by_symbol_time(db, symbol=symbol, start_time= curr_time - timedelta(minutes=1), end_time=curr_time)
         data = [result.__dict__ for result in market_data]
     
     # Remove the SQLAlchemy instance state from each dictionary
@@ -75,9 +76,9 @@ def volume_cluster(footprint, tick_size = 0.25, cluster_param = 5):
         max = price_by_time['Price'].max()
         min = price_by_time['Price'].min()
         if (max - min)/tick_size == cluster_param-1:
-            result = result.append(pd.DataFrame([[time, max]],columns=['Time', 'TopPrice']))
+            result = pd.concat([result, pd.DataFrame([['Volume Cluster', time, max]],columns=['Event', 'Time', 'Price'])])
     if result.empty:
-        result = result.append(pd.DataFrame([[time, 0]],columns=['Time', 'TopPrice']))
+        result = pd.concat([result, pd.DataFrame([['NaN', time, 0]],columns=['Event', 'Time', 'Price'])])
     
     return result
 
@@ -102,7 +103,7 @@ def imbalance(footprint, tick_size = 0.25, stacked_param = 3, imbalance_param = 
        (temp['imbalance'] >= imbalance_param) & (temp['Bid'] < temp['Ask'])
        ]
     # create a list of the values we want to assign for each condition
-    values = ['S', 'B']
+    values = ['Selling Imbalance', 'Buying Imbalance']
     # create a new column and use np.select to assign values to it using our lists as arguments
     temp['Imbalance_Flag'] = np.select(conditions, values)
     data = temp[['Price', 'Imbalance_Flag']]
@@ -112,7 +113,7 @@ def imbalance(footprint, tick_size = 0.25, stacked_param = 3, imbalance_param = 
     stack_price = 0
     current_flag = 'n'
     for price, flag in data.itertuples(index=False):
-        if flag in ('S','B') and flag == current_flag:
+        if flag in ('Selling Imbalance', 'Buying Imbalance') and flag == current_flag:
             count +=1
             current_flag = flag
         else:
@@ -120,9 +121,9 @@ def imbalance(footprint, tick_size = 0.25, stacked_param = 3, imbalance_param = 
             current_flag = flag
             stack_price = price
         if count == stacked_param:
-            result = result.append(pd.DataFrame([[time, stack_price, flag]],columns=['Time', 'StackedPrice','StackType']))
+            result = pd.concat([result, pd.DataFrame([[flag, time, stack_price]],columns=['Event', 'Time', 'Price'])])
     if result.empty:
-        result = result.append(pd.DataFrame([[time, 0, 'NaN']],columns=['Time', 'StackedPrice','StackType']))
+        result = pd.concat([result, pd.DataFrame([['NaN', time, 0]],columns=['Event', 'Time', 'Price'])])
     
     return result
 
@@ -134,46 +135,67 @@ def multiple_high_volume_node(footprint, n_node = 2, last_price = 0, multiple_co
     if price == last_price:
         multiple_count += 1
         if multiple_count == n_node:
-            result = result.append(pd.DataFrame([[time, price]],columns=['Time', 'HighVolumePrice']))
+            result = pd.concat([result, pd.DataFrame([['Multiple High Volume Node', time, price]],columns=['Event', 'Time', 'Price'])])
     else:
         multiple_count = 1    
     
     if result.empty:
-        result = result.append(pd.DataFrame([[time, 0]],columns=['Time', 'HighVolumePrice']))
+        result = pd.concat([result, pd.DataFrame([['NaN', time, 0]],columns=['Event', 'Time', 'Price'])])
     
     return price, multiple_count, result
+
+def zero_print(footprint):
+    result = pd.DataFrame()
+    time = footprint.loc[0,'Time']
+    df = footprint.sort_values(by=['Price'],ascending=False)
+    if df['Bid'].iloc[-1] == 0:
+        result = pd.concat([result, pd.DataFrame([['Bid Zero Print', time, df['Price'].iloc[-1]]],columns=['Event', 'Time', 'Price'])])
+    if df['Ask'].iloc[0] == 0:
+        result = pd.concat([result, pd.DataFrame([['Ask Zero Print', time, df['Price'].iloc[0]]],columns=['Event', 'Time', 'Price'])])
+    if result.empty:
+        result = pd.concat([result, pd.DataFrame([['NaN', time, 0]],columns=['Event', 'Time', 'Price'])])
+    return result
     
 def main():
-    last_price = 0,
-    multiple_count = 1
+    last_price_dict = {ticker: 0 for ticker in tickers}
+    multiple_count_dict = {ticker: 1 for ticker in tickers}
     start_time = datetime.now().strftime("%Y-%m-%d_%H-%M")
     while True:
-        #fetch_and_print_latest_data()
-        try:
-            df = fetch_and_print_last_min_data()
-        except Exception as e:
-            print(e)
-        if df.empty:
-            continue
-        footprint = foot_print_transformation(df)
-        cluster_result = volume_cluster(footprint)
-        cluster_result.to_csv(f'cluster_{start_time}.csv', sep='\t', header=None, mode='a')
-        if cluster_result['TopPrice'][0] != 0:
-            notification.sent_msg(f"Volume cluster at {cluster_result['TopPrice'][0]} USD at {cluster_result['Time'][0]}")
+        for ticker in tickers:
+            #fetch_and_print_latest_data()
+            try:
+                df = fetch_and_print_last_min_data(ticker)
+            except Exception as e:
+                print(e)
+            if df.empty:
+                continue
+            footprint = foot_print_transformation(df)
+            cluster_result = volume_cluster(footprint)
+            cluster_result.insert(loc=0, column='Symbol', value=ticker)
+            if cluster_result['Price'][0] != 0:
+                notification.sent_msg(f"{cluster_result['Symbol'][0]}: {cluster_result['Event'][0]} at {cluster_result['Price'][0]} USD at {cluster_result['Time'].dt.strftime('%Y-%m-%d %H:%M')[0]}")
+                cluster_result.to_csv(f'log_{start_time}.csv', sep='\t', header=None, mode='a')
+            
+            imbalance_result = imbalance(footprint)
+            imbalance_result.insert(loc=0, column='Symbol', value=ticker)
+            if imbalance_result['Price'][0] != 0:
+                notification.sent_msg(f"{imbalance_result['Symbol'][0]}: {imbalance_result['Event'][0]} at {imbalance_result['Price'][0]} USD at {imbalance_result['Time'].dt.strftime('%Y-%m-%d %H:%M')[0]}")
+                imbalance_result.to_csv(f'log_{start_time}.csv', sep='\t', header=None, mode='a')
 
-        imbalance_result = imbalance(footprint)
-        imbalance_result.to_csv(f'imbalance_{start_time}.csv', sep='\t', header=None, mode='a')
-        if imbalance_result['StackedPrice'][0] != 0:
-            notification.sent_msg(f"{imbalance_result['StackType'][0]} stacked imbalance at {imbalance_result['StackedPrice'][0]} USD at {imbalance_result['Time'][0]}")
+            price, multiple_count_new, multiple_result = multiple_high_volume_node(footprint, n_node=2, last_price=last_price_dict[ticker], multiple_count=multiple_count_dict[ticker])
+            multiple_result.insert(loc=0, column='Symbol', value=ticker)
+            if multiple_result['Price'][0] != 0:
+                notification.sent_msg(f"{multiple_result['Symbol'][0]}: {multiple_result['Event'][0]} at {multiple_result['Price'][0]} USD at {multiple_result['Time'].dt.strftime('%Y-%m-%d %H:%M')[0]}")
+                multiple_result.to_csv(f'log_{start_time}.csv', sep='\t', header=None, mode='a')
+            last_price_dict[ticker] = price
+            multiple_count_dict[ticker] = multiple_count_new
+            
+            zero_print_result = zero_print(footprint)
+            zero_print_result.insert(loc=0, column='Symbol', value=ticker)
+            if zero_print_result['Price'].iloc[0] != 0:
+                notification.sent_msg(f"{zero_print_result['Symbol'].iloc[0]}: {zero_print_result['Event'].iloc[0]} zero print at {zero_print_result['Price'].iloc[0]} USD at {zero_print_result['Time'].dt.strftime('%Y-%m-%d %H:%M').iloc[0]}")
+                zero_print_result.to_csv(f'log_{start_time}.csv', sep='\t', header=None, mode='a')
 
-        price, multiple_count_new, multiple_result = multiple_high_volume_node(footprint, n_node=2, last_price=last_price, multiple_count=multiple_count)
-        multiple_result.to_csv(f'multiple_{start_time}.csv', sep='\t', header=None, mode='a')
-        if multiple_result['HighVolumePrice'][0] != 0:
-            notification.sent_msg(f"Multiple high volume node at {multiple_result['HighVolumePrice'][0]} USD at {multiple_result['Time'][0]}")
-
-
-        last_price = price
-        multiple_count = multiple_count_new
         time.sleep(60)
 
 if __name__ == "__main__":
