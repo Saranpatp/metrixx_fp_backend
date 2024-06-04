@@ -155,7 +155,19 @@ def zero_print(footprint):
     if result.empty:
         result = pd.concat([result, pd.DataFrame([['NaN', time, 0]],columns=['Event', 'Time', 'Price'])])
     return result
-    
+
+def failed_auction(footprint):
+    result = pd.DataFrame()
+    time = footprint.loc[0,'Time']
+    df = footprint.sort_values(by=['Price'],ascending=False)
+    if df['Bid'].iloc[0] != 0:
+        result = pd.concat([result, pd.DataFrame([['Failed Auction - Bid High', time, df['Price'].iloc[0]]],columns=['Event', 'Time', 'Price'])])
+    if df['Ask'].iloc[-1] != 0:
+        result = pd.concat([result, pd.DataFrame([['Fail Auction - Ask Low', time, df['Price'].iloc[-1]]],columns=['Event', 'Time', 'Price'])])
+    if result.empty:
+        result = pd.concat([result, pd.DataFrame([['NaN', time, 0]],columns=['Event', 'Time', 'Price'])])
+    return result
+
 def main():
     last_price_dict = {ticker: 0 for ticker in tickers}
     multiple_count_dict = {ticker: 1 for ticker in tickers}
@@ -193,8 +205,14 @@ def main():
             zero_print_result = zero_print(footprint)
             zero_print_result.insert(loc=0, column='Symbol', value=ticker)
             if zero_print_result['Price'].iloc[0] != 0:
-                notification.sent_msg(f"{zero_print_result['Symbol'].iloc[0]}: {zero_print_result['Event'].iloc[0]} zero print at {zero_print_result['Price'].iloc[0]} USD at {zero_print_result['Time'].dt.strftime('%Y-%m-%d %H:%M').iloc[0]}")
+                notification.sent_msg(f"{zero_print_result['Symbol'].iloc[0]}: {zero_print_result['Event'].iloc[0]} at {zero_print_result['Price'].iloc[0]} USD at {zero_print_result['Time'].dt.strftime('%Y-%m-%d %H:%M').iloc[0]}")
                 zero_print_result.to_csv(f'log_{start_time}.csv', sep='\t', header=None, mode='a')
+
+            failed_auction_result = failed_auction(footprint)
+            failed_auction_result.insert(loc=0, column='Symbol', value=ticker)
+            if failed_auction_result['Price'].iloc[0] != 0:
+                notification.sent_msg(f"{failed_auction_result['Symbol'].iloc[0]}: {failed_auction_result['Event'].iloc[0]} at {failed_auction_result['Price'].iloc[0]} USD at {failed_auction_result['Time'].dt.strftime('%Y-%m-%d %H:%M').iloc[0]}")
+                failed_auction_result.to_csv(f'log_{start_time}.csv', sep='\t', header=None, mode='a')
 
         time.sleep(60)
 
